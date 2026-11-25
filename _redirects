@@ -1,0 +1,4 @@
+# Send every alternate domain to the main one (works once each is added as a domain alias in Netlify)
+https://www.evebeautysourcenyc.com/*  https://evebeautysourcenyc.com/:splat  301!
+https://evebeautysourceny.com/*       https://evebeautysourcenyc.com/:splat  301!
+https://www.evebeautysourceny.com/*   https://evebeautysourcenyc.com/:splat  301!
