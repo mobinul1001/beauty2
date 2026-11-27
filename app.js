@@ -32,6 +32,7 @@
   /* if a photo fails to load, fall back to the letter placeholder */
   function swap(e){
     var t=e.target;
+    if(t&&t.parentNode&&t.parentNode.classList&&t.parentNode.classList.contains('th'))return; /* search thumbnails are handled in search.js */
     if(e.type==='load'&&!(t.naturalWidth<=10))return; /* Amazon returns a 1px blank image for some products */
     if(t&&t.tagName==='IMG'&&t.getAttribute('data-alt')){var nx=t.getAttribute('data-alt');t.removeAttribute('data-alt');t.src=nx;return} /* try the second image source once */
     if(t&&t.tagName==='IMG'&&t.parentNode&&t.parentNode.classList.contains('cp')){t.parentNode.removeChild(t);return}
@@ -47,15 +48,6 @@
 
   var body=document.body, dept=body.getAttribute('data-dept'), isShop=body.getAttribute('data-page')==='shop', isHome=body.getAttribute('data-page')==='home';
 
-  /* header search: go to the shop page with the query */
-  var hs=document.querySelector('.hsearch');
-  if(hs){
-    var qv=/[?&]q=([^&]*)/.exec(location.search);
-    if(qv&&hs.q) hs.q.value=decodeURIComponent(qv[1].replace(/\+/g,' '));
-    hs.addEventListener('submit',function(e){
-      if(isShop){e.preventDefault();var el=$('q');if(el){el.value=hs.q.value;el.dispatchEvent(new Event('input'))}}
-    });
-  }
   if(!dept && !isShop && !isHome) return;
 
   fetch('products.json').then(function(r){if(!r.ok)throw 0;return r.json()}).catch(function(){if(window.PRODUCTS)return window.PRODUCTS;throw 0}).then(function(ALL){
@@ -97,7 +89,7 @@
     function match(p,skip){
       if(skip!=='cat'){var k=Object.keys(st.cat);if(k.length&&!st.cat[p.category])return false}
       if(skip!=='brand'){var b=Object.keys(st.brand);if(b.length&&!st.brand[p._b])return false}
-      if(st.q){var t=((p.title||'')+' '+p.category+' '+(p._b||'')).toLowerCase();if(t.indexOf(st.q)<0)return false}
+      if(st.q){if(window.EveSearch){if(!EveSearch.test(p,st.q))return false}else{var t=((p.title||'')+' '+p.category+' '+(p._b||'')).toLowerCase();if(t.indexOf(st.q)<0)return false}}
       return true;
     }
     function result(){
@@ -153,7 +145,7 @@
       t.textContent=g.classList.contains('open')?'Show less':'Show all '+g.querySelectorAll('.opt').length;
     });
     var dq=$('dq'),tm;
-    dq.addEventListener('input',function(){clearTimeout(tm);tm=setTimeout(function(){st.q=dq.value.trim().toLowerCase();render()},120)});
+    dq.addEventListener('input',function(){clearTimeout(tm);tm=setTimeout(function(){st.q=dq.value.trim();render()},120)});
     $('sort').addEventListener('change',function(){st.sort=this.value;render()});
     $('more').addEventListener('click',function(){st.shown+=PAGE;render(true)});
     $('sclear').addEventListener('click',clearAll);
@@ -192,28 +184,38 @@
         cats.map(function(c){return '<button class="chip" type="button" data-c="'+esc(c)+'" aria-pressed="'+(state.cat===c?'true':'false')+'">'+esc(c)+'</button>'}).join('')):'';
     }
     function filtered(){
-      var q=state.q.trim().toLowerCase();
-      return ALL.filter(function(p){
+      var q=state.q.trim();
+      var base=ALL.filter(function(p){
         if(state.dept&&p.dept!==state.dept)return false;
         if(state.cat&&p.category!==state.cat)return false;
-        if(q&&(p.title+' '+p.category+' '+p.dept+' '+p.description).toLowerCase().indexOf(q)<0)return false;
         return true;
       });
+      state.fix='';state.partial=false;
+      if(!q)return base;
+      if(window.EveSearch){var r=EveSearch.rank(base,q);if(r.corrected)state.fix=r.q2;state.partial=r.partial;return r.items}
+      var ql=q.toLowerCase();
+      return base.filter(function(p){return (p.title+' '+p.category+' '+p.dept).toLowerCase().indexOf(ql)>=0});
     }
     function render(){
       var l=filtered(),s=l.slice(0,state.shown);
-      grid.innerHTML=s.length?s.map(card).join(''):'<div class="empty">No products match. Try another word or show everything.</div>';
-      count.textContent=l.length+' product'+(l.length===1?'':'s')+(state.dept?' in '+state.dept:'')+(state.cat?' / '+state.cat:'');
+      grid.innerHTML=s.length?s.map(card).join(''):'<div class="empty"><b>No products found'+(state.q?' for \u201c'+esc(state.q)+'\u201d':'')+'.</b><br>Check the spelling, try a shorter word, or <button type="button" class="lnk" id="eclr">show everything</button>.</div>';
+      var ec=$('eclr');if(ec)ec.addEventListener('click',function(){$('reset').click()});
+      count.textContent=l.length+' product'+(l.length===1?'':'s')+(state.q?' for \u201c'+state.q.trim()+'\u201d':'')+(state.dept?' in '+state.dept:'')+(state.cat?' / '+state.cat:'')+(state.fix?' (showing results for \u201c'+state.fix+'\u201d)':'')+(state.partial?' (partial matches)':'');
       more.hidden=l.length<=state.shown;
     }
     function upd(){state.shown=PAGE;buildChips();render()}
     dchips.addEventListener('click',function(e){var b=e.target.closest('.chip');if(!b)return;state.dept=b.getAttribute('data-d');state.cat='';upd()});
     chips.addEventListener('click',function(e){var b=e.target.closest('.chip');if(!b)return;state.cat=b.getAttribute('data-c');upd()});
-    $('q').addEventListener('input',function(e){state.q=e.target.value;state.shown=PAGE;render()});
-    $('reset').addEventListener('click',function(){state={dept:'',cat:'',q:'',shown:PAGE};$('q').value='';upd()});
+    function syncHeader(){var hq=$('hq');if(hq)hq.value=state.q}
+    $('q').addEventListener('input',function(e){state.q=e.target.value;state.shown=PAGE;syncHeader();try{history.replaceState(null,'',state.q.trim()?'#q='+encodeURIComponent(state.q.trim()):location.pathname+location.search)}catch(x){}render()});
+    $('reset').addEventListener('click',function(){state={dept:'',cat:'',q:'',shown:PAGE};$('q').value='';syncHeader();try{history.replaceState(null,'',location.pathname+location.search)}catch(x){}upd()});
     more.addEventListener('click',function(){state.shown+=PAGE;render()});
-    var m=/[?&]q=([^&]*)/.exec(location.search);
-    if(m){state.q=decodeURIComponent(m[1].replace(/\+/g,' '));$('q').value=state.q}
+    function fromUrl(){
+      var q=(window.EveSearch&&EveSearch.hashQuery)?EveSearch.hashQuery():'';
+      state.q=q;$('q').value=q;syncHeader();
+    }
+    fromUrl();
+    window.addEventListener('hashchange',function(){fromUrl();state.dept='';state.cat='';upd()});
     upd();
   }
 
